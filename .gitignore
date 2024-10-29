@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual Environment
+venv/
+env/
+.env/
+
+# Jupyter Notebook Checkpoints
+.ipynb_checkpoints
+
+# Other Python-specific files
+.DS_Store  # macOS
+.vscode/   # Visual Studio Code
+*.egg-info/
