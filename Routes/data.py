@@ -1,3 +1,5 @@
+import pickle
+import os
 from sqlite3 import IntegrityError
 from typing import List
 from fastapi.responses import FileResponse
@@ -14,6 +16,7 @@ import requests
 from datetime import datetime, timedelta
 import backtrader as bt
 import pandas as pd
+import numpy as np
 
 router=APIRouter(
     prefix="/data",
@@ -47,7 +50,7 @@ async def test_posts(db: AsyncSession = Depends(get_db)):
 
 @router.post('/populate', response_model=List[schemas.CreateStockData])
 async def populate_stocks(db: AsyncSession = Depends(get_db)):
-    api_key = "70K7U0ICKG3Q15KB"
+    api_key = os.getenv("ALPHA_VANTAGE_API_KEY")
     symbol = "IBM"
     url = f'https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={symbol}&apikey={api_key}&outputsize=full'
 
@@ -212,3 +215,75 @@ def plot_results(cerebro):
 @router.get("/backtest")
 async def read_backtest():
     return FileResponse("static/backtest.html")
+
+
+
+# Load your trained model using pickle
+with open("models/model.pkl", "rb") as model_file:
+    model = pickle.load(model_file)
+
+@router.post('/predict', response_model=List[schemas.PredictedStockData])
+async def predict_stock_prices(
+    symbol: str = Body(..., description="Stock symbol to predict prices for"),
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        # Fetch historical data for the stock symbol
+        result = await db.execute(select(models.StockData).filter(models.StockData.symbol == symbol))
+        historical_data = result.scalars().all()
+        
+        if not historical_data:
+            raise HTTPException(status_code=404, detail="No historical data found for the specified symbol.")
+
+        # Convert historical data to DataFrame
+        data_dicts = [
+            {
+                "date": stock.date,
+                "open_price": stock.open_price,
+                "close_price": stock.close_price,
+                "high_price": stock.high_price,
+                "low_price": stock.low_price,
+                "volume": stock.volume,
+            }
+            for stock in historical_data
+        ]
+        df = pd.DataFrame(data_dicts)
+
+        # Prepare data for model input
+        n = 30  # Number of days to use for prediction
+        if len(df) < n:
+            raise HTTPException(status_code=400, detail="Not enough historical data for prediction.")
+
+        # Get the last n days of closing prices
+        last_n_days = df['close_price'].values[-n:]
+
+        # Reshape for model input
+        inputs = np.array(last_n_days).reshape(1, n)  # Adjust based on your model's input shape
+
+        # Make predictions for the next 30 days
+        predictions = model.predict(inputs).flatten().tolist()  # Modify based on your model's output
+
+        # Prepare the next 30 days' dates
+        last_date = df['date'].max()
+        prediction_dates = [last_date + timedelta(days=i) for i in range(1, 31)]
+
+        # Store predictions in the database
+        prediction_entries = []
+        for date, predicted_price in zip(prediction_dates, predictions):
+            prediction_entry = models.PredictedStockData(
+                symbol=symbol,
+                date=date,
+                predicted_price=predicted_price
+            )
+            prediction_entries.append(prediction_entry)
+        
+        async with db.begin():
+            db.add_all(prediction_entries)
+
+        # Return predictions
+        return [{"date": entry.date, "predicted_price": entry.predicted_price} for entry in prediction_entries]
+
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail="Database error occurred.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An error occurred during prediction: {str(e)}")

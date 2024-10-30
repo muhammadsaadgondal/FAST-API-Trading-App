@@ -20,3 +20,17 @@ class StockDataResponse(StockDataBase):
     id: int  # Include the ID field for responses
     class Config:
         orm_mode = True
+        
+
+class PredictedStockDataBase(BaseModel):
+    symbol: str
+    predicted_price: float
+    date: date
+
+    class Config:
+        orm_mode = True  # Enable ORM mode to work with SQLAlchemy models
+
+
+# Schema for responses to clients
+class PredictedStockDataResponse(PredictedStockDataBase):
+    id: int

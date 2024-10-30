@@ -5,7 +5,11 @@ import models
 from database import engine, get_db
 import Routes.data as sdata
 import asyncpg
+from dotenv import load_dotenv
 # Create the database tables
+
+load_dotenv()
+
 async def init_models():
     async with engine.begin() as conn:
         await conn.run_sync(models.Base.metadata.create_all)
