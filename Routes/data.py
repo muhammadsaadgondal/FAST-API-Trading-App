@@ -1,4 +1,3 @@
-import pickle
 import os
 from sqlite3 import IntegrityError
 from typing import List
@@ -8,7 +7,6 @@ from fastapi import APIRouter, Body, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.exc import SQLAlchemyError
-from starlette import status
 import schemas
 import models
 from fastapi import APIRouter
@@ -108,20 +106,17 @@ class MovingAverageCrossStrategy(bt.Strategy):
     def __init__(self):
         self.short_ma = bt.indicators.SimpleMovingAverage(self.data.close, period=self.params.short_period)
         self.long_ma = bt.indicators.SimpleMovingAverage(self.data.close, period=self.params.long_period)
-        self.order = None
+        self.predicted_prices = []  # Store predicted prices
 
     def next(self):
-        if self.order:
-            return
-
-        print(f"Close: {self.data.close[0]}, Short MA: {self.short_ma[0]}, Long MA: {self.long_ma[0]}")  # Debugging line
-
         if self.short_ma[0] > self.long_ma[0]:
-            if not self.position:
-                self.order = self.buy()
+            # Predict next price based on some logic, here simply using close price
+            self.predicted_prices.append(self.data.close[0])
         elif self.short_ma[0] < self.long_ma[0]:
-            if self.position:
-                self.order = self.sell()
+            # Predict next price based on some logic, here simply using close price
+            self.predicted_prices.append(self.data.close[0])
+        else:
+            self.predicted_prices.append(self.data.close[0])  # No change in prediction
 
 
 @router.post('/backtest', response_model=dict)
@@ -218,11 +213,8 @@ async def read_backtest():
 
 
 
-# Load your trained model using pickle
-with open("models/model.pkl", "rb") as model_file:
-    model = pickle.load(model_file)
 
-@router.post('/predict', response_model=List[schemas.PredictedStockData])
+@router.post('/predict', response_model=List[schemas.PredictedStockDataBase])
 async def predict_stock_prices(
     symbol: str = Body(..., description="Stock symbol to predict prices for"),
     db: AsyncSession = Depends(get_db)
@@ -249,27 +241,38 @@ async def predict_stock_prices(
         ]
         df = pd.DataFrame(data_dicts)
 
-        # Prepare data for model input
-        n = 30  # Number of days to use for prediction
-        if len(df) < n:
-            raise HTTPException(status_code=400, detail="Not enough historical data for prediction.")
+        # Prepare data for Backtrader
+        df['date'] = pd.to_datetime(df['date'])
+        df.set_index('date', inplace=True)
 
-        # Get the last n days of closing prices
-        last_n_days = df['close_price'].values[-n:]
+        # Set up Backtrader
+        cerebro = bt.Cerebro()
+        data_feed = bt.feeds.PandasData(
+            dataname=df,
+            open='open_price',
+            high='high_price',
+            low='low_price',
+            close='close_price',
+            volume='volume',
+        )
+        cerebro.adddata(data_feed)
 
-        # Reshape for model input
-        inputs = np.array(last_n_days).reshape(1, n)  # Adjust based on your model's input shape
+        # Add the strategy
+        strategy = cerebro.addstrategy(MovingAverageCrossStrategy)
 
-        # Make predictions for the next 30 days
-        predictions = model.predict(inputs).flatten().tolist()  # Modify based on your model's output
+        # Run the strategy
+        cerebro.run()
+
+        # Access predicted prices
+        predicted_prices = strategy[0].predicted_prices[-30:]  # Get the last 30 predictions
 
         # Prepare the next 30 days' dates
-        last_date = df['date'].max()
+        last_date = df.index.max()
         prediction_dates = [last_date + timedelta(days=i) for i in range(1, 31)]
 
         # Store predictions in the database
         prediction_entries = []
-        for date, predicted_price in zip(prediction_dates, predictions):
+        for date, predicted_price in zip(prediction_dates, predicted_prices):
             prediction_entry = models.PredictedStockData(
                 symbol=symbol,
                 date=date,
