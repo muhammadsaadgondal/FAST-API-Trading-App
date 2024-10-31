@@ -15,11 +15,8 @@ class StockData(Base):
     
     
 class PredictedStockData(Base):
-    __tablename__ = "predicted_stock_data"
+    __tablename__ = 'predicted_stock_data'
     id = Column(Integer, primary_key=True, index=True)
-    symbol = Column(String, index=True)  # Stock symbol
-    predicted_price = Column(Float)  # Predicted stock price
-    date = Column(Date)  # Date for which the prediction is made
-
-    def __repr__(self):
-        return f"<PredictedStockData(symbol={self.symbol}, predicted_price={self.predicted_price}, date={self.date})>"
+    symbol = Column(String, nullable=False)
+    date = Column(Date, nullable=False)
+    predicted_price = Column(Float, nullable=False)

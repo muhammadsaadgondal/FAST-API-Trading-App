@@ -22,15 +22,14 @@ class StockDataResponse(StockDataBase):
         orm_mode = True
         
 
-class PredictedStockDataBase(BaseModel):
-    symbol: str
+class PredictedStockData(BaseModel):
+    date: str  # Assuming you will return a date
+    symbol:str
     predicted_price: float
-    date: date
-
     class Config:
         orm_mode = True  # Enable ORM mode to work with SQLAlchemy models
 
 
 # Schema for responses to clients
-class PredictedStockDataResponse(PredictedStockDataBase):
+class PredictedStockDataResponse(PredictedStockData):
     id: int

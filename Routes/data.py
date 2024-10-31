@@ -7,7 +7,9 @@ from fastapi import APIRouter, Body, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.exc import SQLAlchemyError
+import logging
 import schemas
+from sklearn.linear_model import LinearRegression
 import models
 from fastapi import APIRouter
 import requests
@@ -20,6 +22,7 @@ router=APIRouter(
     prefix="/data",
      tags=['Data']
 )
+
 
 
 @router.get('/', response_model=List[schemas.CreateStockData])
@@ -100,23 +103,21 @@ async def populate_stocks(db: AsyncSession = Depends(get_db)):
     
     
     
+
 class MovingAverageCrossStrategy(bt.Strategy):
     params = (('short_period', 50), ('long_period', 200))
 
     def __init__(self):
         self.short_ma = bt.indicators.SimpleMovingAverage(self.data.close, period=self.params.short_period)
         self.long_ma = bt.indicators.SimpleMovingAverage(self.data.close, period=self.params.long_period)
-        self.predicted_prices = []  # Store predicted prices
+        self.predicted_price = []  # Initialize predicted_prices as an instance variable
 
     def next(self):
-        if self.short_ma[0] > self.long_ma[0]:
-            # Predict next price based on some logic, here simply using close price
-            self.predicted_prices.append(self.data.close[0])
-        elif self.short_ma[0] < self.long_ma[0]:
-            # Predict next price based on some logic, here simply using close price
-            self.predicted_prices.append(self.data.close[0])
-        else:
-            self.predicted_prices.append(self.data.close[0])  # No change in prediction
+        # Add your logic for predicting prices
+        if self.short_ma[0] > self.long_ma[0] or self.short_ma[0] < self.long_ma[0]:
+            # Append current close price to predictions
+            self.predicted_prices.append(self.data.close[0])  # Now this works correctly
+
 
 
 @router.post('/backtest', response_model=dict)
@@ -211,19 +212,24 @@ def plot_results(cerebro):
 async def read_backtest():
     return FileResponse("static/backtest.html")
 
+logging.basicConfig(level=logging.ERROR)
+logger = logging.getLogger(__name__)
 
 
-
-@router.post('/predict', response_model=List[schemas.PredictedStockDataBase])
+@router.post('/predict', response_model=List[schemas.PredictedStockData])
 async def predict_stock_prices(
-    symbol: str = Body(..., description="Stock symbol to predict prices for"),
     db: AsyncSession = Depends(get_db)
 ):
     try:
+        # Log the session to ensure it's not None
+        if db is None:
+            raise HTTPException(status_code=500, detail="Database session is None.")
+
         # Fetch historical data for the stock symbol
-        result = await db.execute(select(models.StockData).filter(models.StockData.symbol == symbol))
+        result = await db.execute(select(models.StockData).filter(models.StockData.symbol == "IBM"))
         historical_data = result.scalars().all()
-        
+
+        print("==========DATA FOUND============")
         if not historical_data:
             raise HTTPException(status_code=404, detail="No historical data found for the specified symbol.")
 
@@ -231,62 +237,57 @@ async def predict_stock_prices(
         data_dicts = [
             {
                 "date": stock.date,
-                "open_price": stock.open_price,
                 "close_price": stock.close_price,
-                "high_price": stock.high_price,
-                "low_price": stock.low_price,
-                "volume": stock.volume,
             }
             for stock in historical_data
         ]
         df = pd.DataFrame(data_dicts)
 
-        # Prepare data for Backtrader
+        # Prepare data for Linear Regression
         df['date'] = pd.to_datetime(df['date'])
-        df.set_index('date', inplace=True)
+        df['days'] = (df['date'] - df['date'].min()).dt.days  # Convert dates to numerical values
 
-        # Set up Backtrader
-        cerebro = bt.Cerebro()
-        data_feed = bt.feeds.PandasData(
-            dataname=df,
-            open='open_price',
-            high='high_price',
-            low='low_price',
-            close='close_price',
-            volume='volume',
-        )
-        cerebro.adddata(data_feed)
+        # Fit a linear regression model
+        X = df[['days']]  # Features (days)
+        y = df['close_price']  # Target variable (close price)
+        
+        model = LinearRegression()
+        model.fit(X, y)
 
-        # Add the strategy
-        strategy = cerebro.addstrategy(MovingAverageCrossStrategy)
-
-        # Run the strategy
-        cerebro.run()
-
-        # Access predicted prices
-        predicted_prices = strategy[0].predicted_prices[-30:]  # Get the last 30 predictions
-
-        # Prepare the next 30 days' dates
-        last_date = df.index.max()
-        prediction_dates = [last_date + timedelta(days=i) for i in range(1, 31)]
-
-        # Store predictions in the database
+        print("=========Model Fitted===========")
+        # Predict the next 30 days
+        last_day = df['days'].max()
+        future_days = np.array(range(last_day + 1, last_day + 31)).reshape(-1, 1)
+        predicted_prices = model.predict(future_days)
+        
+        print("=========Predictio Start===========")
+        # Prepare predictions for insertion
         prediction_entries = []
-        for date, predicted_price in zip(prediction_dates, predicted_prices):
+        last_date = df['date'].max()
+        for i, predicted_price in enumerate(predicted_prices):
+            prediction_date = last_date + timedelta(days=i + 1)
             prediction_entry = models.PredictedStockData(
-                symbol=symbol,
-                date=date,
+                symbol="IBM",
+                date=prediction_date,
                 predicted_price=predicted_price
             )
             prediction_entries.append(prediction_entry)
+            print("Prediction ", prediction_entry.predicted_price,prediction_entry.date)  # Print entries for debugging
+
         
-        async with db.begin():
-            db.add_all(prediction_entries)
+        print("=========Starting Push to db===========")
+        await db.add_all(prediction_entries)  # Add entries to the session
+
+        print("=========Commiting to DB===========")
+        await db.commit()  # Commit the transaction
 
         # Return predictions
         return [{"date": entry.date, "predicted_price": entry.predicted_price} for entry in prediction_entries]
 
     except SQLAlchemyError as e:
+        logger.error(f"Database error occurred: {str(e)}")
         raise HTTPException(status_code=500, detail="Database error occurred.")
     except Exception as e:
+        logger.error(f"An unexpected error occurred: {str(e)}")
         raise HTTPException(status_code=500, detail=f"An error occurred during prediction: {str(e)}")
+
