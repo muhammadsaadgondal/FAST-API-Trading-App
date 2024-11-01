@@ -1,0 +1,17 @@
+asyncpg                      
+backtrader                   
+fastapi                      
+keras                        
+matplotlib                   
+numpy                        
+pandas                       
+pillow                       
+pydantic                     
+python-dotenv                
+requests                   
+scikit-learn                 
+scipy                        
+SQLAlchemy                  
+starlette                    
+tensorflow                                   
+uvicorn                                          

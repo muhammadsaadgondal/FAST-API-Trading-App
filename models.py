@@ -20,3 +20,4 @@ class PredictedStockData(Base):
     symbol = Column(String, nullable=False)
     date = Column(Date, nullable=False)
     predicted_price = Column(Float, nullable=False)
+    actual_price=Column(Float,nullable=False)

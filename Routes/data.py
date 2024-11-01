@@ -17,6 +17,9 @@ from datetime import datetime, timedelta
 import backtrader as bt
 import pandas as pd
 import numpy as np
+import matplotlib
+import matplotlib.pyplot as plt
+matplotlib.use('Agg')
 
 router=APIRouter(
     prefix="/data",
@@ -25,11 +28,13 @@ router=APIRouter(
 
 
 
-@router.get('/', response_model=List[schemas.CreateStockData])
-async def test_posts(db: AsyncSession = Depends(get_db)):
+@router.get('/display/{symbol}', response_model=List[schemas.CreateStockData])
+async def test_posts(symbol:str,db: AsyncSession = Depends(get_db)):
     try:
-        # Execute the query to fetch all stock data
-        result = await db.execute(select(models.StockData))
+        # Execute the query to fetch stock data with the specified symbol
+        result = await db.execute(
+            select(models.StockData).where(models.StockData.symbol == symbol)
+        )
         sdata = result.scalars().all()
 
         if not sdata:
@@ -49,10 +54,10 @@ async def test_posts(db: AsyncSession = Depends(get_db)):
         print(f"An unexpected error occurred: {e}")
         raise HTTPException(status_code=500, detail="An unexpected error occurred while processing your request.")
 
-@router.post('/populate', response_model=List[schemas.CreateStockData])
-async def populate_stocks(db: AsyncSession = Depends(get_db)):
+@router.post('/populate/{symbol}', response_model=List[schemas.CreateStockData])
+async def populate_stocks(symbol:str,db: AsyncSession = Depends(get_db)):
     api_key = os.getenv("ALPHA_VANTAGE_API_KEY")
-    symbol = "IBM"
+    symbol = symbol
     url = f'https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={symbol}&apikey={api_key}&outputsize=full'
 
     try:
@@ -110,35 +115,41 @@ class MovingAverageCrossStrategy(bt.Strategy):
     def __init__(self):
         self.short_ma = bt.indicators.SimpleMovingAverage(self.data.close, period=self.params.short_period)
         self.long_ma = bt.indicators.SimpleMovingAverage(self.data.close, period=self.params.long_period)
-        self.predicted_price = []  # Initialize predicted_prices as an instance variable
+        self.predicted_price = []  
 
     def next(self):
         # Add your logic for predicting prices
         if self.short_ma[0] > self.long_ma[0] or self.short_ma[0] < self.long_ma[0]:
             # Append current close price to predictions
-            self.predicted_prices.append(self.data.close[0])  # Now this works correctly
+            self.predicted_price.append(self.data.close[0])  # Now this works correctly
 
 
 
 @router.post('/backtest', response_model=dict)
 async def backtest_strategy(
+    symbol: str = Body(..., description="Stock symbol to backtest"),
     short_period: int = Body(..., description="Short moving average period"),
     long_period: int = Body(..., description="Long moving average period"),
     initial_cash: float = Body(..., description="Initial investment amount"),
     db: AsyncSession = Depends(get_db)
 ):
+    # Ensure the static directory exists
+    if not os.path.exists("static"):
+        os.makedirs("static")
+
     # Fetch stock data from the database
-    result = await db.execute(select(models.StockData))
-    sdata = result.scalars().all()
-    
-    # Convert the stock data to a DataFrame for Backtrader
+    stock_data = await db.execute(
+        select(models.StockData).where(models.StockData.symbol == symbol)
+    )
+    sdata = stock_data.scalars().all()
+
     if not sdata:
         raise HTTPException(status_code=404, detail="No stock data found.")
 
     stock_data_dicts = [
         {
             "symbol": stock.symbol,
-            "date": stock.date,  # Ensure date is a datetime object
+            "date": stock.date,
             "open_price": stock.open_price,
             "close_price": stock.close_price,
             "high_price": stock.high_price,
@@ -148,146 +159,207 @@ async def backtest_strategy(
         for stock in sdata
     ]
 
-    # Create a DataFrame from the list of dictionaries
     df = pd.DataFrame(stock_data_dicts)
-
-    # Check for the 'date' column
-    if 'date' not in df.columns:
-        raise KeyError("'date' column not found in DataFrame")
-
-    # Convert 'date' to datetime if it's not already
     df['date'] = pd.to_datetime(df['date'])
-    df['open_price'] = df['open_price'].astype(float)
-    df['high_price'] = df['high_price'].astype(float)
-    df['low_price'] = df['low_price'].astype(float)
-    df['close_price'] = df['close_price'].astype(float)
-    df['volume'] = df['volume'].astype(float)
-    # Set 'date' as the index
     df.set_index('date', inplace=True)
 
-    # Check DataFrame structure after modifications
-    print(df.head())  # Print first few rows
-    # print(df.columns)  # Print column names
-    print(df.isnull().sum())  # Check for NaN values in the DataFrame
-    print("=========================")
-
-    # Set up Backtrader
     cerebro = bt.Cerebro()
     data_feed = bt.feeds.PandasData(
-    dataname=df,
-    open='open_price',  # Name of the column for open prices
-    high='high_price',  # Name of the column for high prices
-    low='low_price',    # Name of the column for low prices
-    close='close_price', # Name of the column for close prices
-    volume='volume',     # Name of the column for volume
-)
+        dataname=df,
+        open='open_price',
+        high='high_price',
+        low='low_price',
+        close='close_price',
+        volume='volume',
+    )
     cerebro.adddata(data_feed)
-
-    # Add the strategy with the specified parameters
     cerebro.addstrategy(MovingAverageCrossStrategy, short_period=short_period, long_period=long_period)
-    cerebro.broker.setcash(initial_cash)  # Set initial cash
+    cerebro.broker.setcash(initial_cash)
 
-    # Run the backtest
     cerebro.run()
+    plot_path = "../static/backtest_plot.png"
 
-    # Get final portfolio value and calculate returns
+    strategy = cerebro.runstrats[0]
+    predicted_price = strategy[0].predicted_price
     final_value = cerebro.broker.getvalue()
-    total_return = final_value - initial_cash  # Assuming initial investment is provided
+    total_return = final_value - initial_cash
+
+    short_mavg = df['close_price'].rolling(window=short_period).mean()
+    long_mavg = df['close_price'].rolling(window=long_period).mean()
+
+    # Use the dates from your DataFrame for historical prices
+    historical_close = df['close_price']  # Ensure you have the close prices
+
+    # Define the date range for predictions
+    predicted_dates = pd.date_range(start=df.index[-1] + pd.Timedelta(days=1), 
+                                    periods=len(predicted_price), freq='B')  # Business days
+
+    # Ensure historical close prices are plotted against their own dates
+    plt.figure(figsize=(14, 7))
+
+    # Plot historical close prices
+    plt.plot(df.index, historical_close, label='Historical Close Prices', color='black', linewidth=1.5)
+
+    # Plot short moving average, using the same index as historical data
+    plt.plot(df.index, short_mavg, label='Short Moving Average', color='orange', linestyle='--')
+
+    # Plot long moving average, using the same index as historical data
+    plt.plot(df.index, long_mavg, label='Long Moving Average', color='green', linestyle='--')
+
+    # Plot predicted prices against the new predicted_dates
+    plt.plot(predicted_dates, predicted_price, label='Predicted Prices(Strategy usage)', color='blue', linestyle='dotted')
+
+    # Indicate the final portfolio value
+    final_value = cerebro.broker.getvalue()
+    plt.axhline(y=final_value, color='red', linestyle='--', label='Final Portfolio Value')
+
+    # Add titles and labels
+    plt.title('Backtest Results with Strategy Performance')
+    plt.xlabel('Date')
+    plt.ylabel('Price')
+    plt.legend()
+    plt.grid()  
+
+    # Save the plot
+    try:
+        plt.savefig(plot_path)
+        print(f"Plot saved to {plot_path}")
+    except Exception as e:
+        print(f"Error saving plot: {e}")
+
+    # Close the plot to free up memory
+    plt.close()
     
-    plot_path = "static/backtest_plot.png"  # Ensure this directory exists
-    cerebro.plot(savefig=plot_path)  # Save the plot to a file
+    # try:
+    #     cerebro.plot(show=False, savefig=plot_path)
+    #     print(f"Plot saved to {plot_path}")
+    # except Exception as e:
+    #     print(f"Error saving plot: {e}")
 
     return {
         "final_value": final_value,
         "total_return": total_return,
+        "predicted_prices": predicted_price,
+        "plot_url": plot_path,
         "performance_summary": "Add more detailed metrics if needed."
     }
 
-def plot_results(cerebro):
-    # Plot the results
-    cerebro.plot(style='candlestick')
-    
-    
-@router.get("/backtest")
-async def read_backtest():
-    return FileResponse("static/backtest.html")
+
 
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
+@router.get("/backtest")
+async def read_backtest():
+    return FileResponse("Views/backtest.html")
 
-@router.post('/predict', response_model=List[schemas.PredictedStockData])
-async def predict_stock_prices(
-    db: AsyncSession = Depends(get_db)
-):
+@router.get("/populate")
+async def read_backtest():
+    return FileResponse("Views/populate.html")
+
+@router.get("/predict")
+async def read_backtest():
+    return FileResponse("Views/prediction.html")
+
+
+@router.get("/summary")
+async def read_backtest():
+    return FileResponse("Views/summary.html")
+
+@router.post('/predict', response_model=dict)
+async def predict_stock_prices(symbol: str = Body(...),db: AsyncSession = Depends(get_db)):
     try:
-        # Log the session to ensure it's not None
+        # Check database session
         if db is None:
             raise HTTPException(status_code=500, detail="Database session is None.")
 
         # Fetch historical data for the stock symbol
-        result = await db.execute(select(models.StockData).filter(models.StockData.symbol == "IBM"))
+        result = await db.execute(select(models.StockData).filter(models.StockData.symbol == symbol))
         historical_data = result.scalars().all()
 
-        print("==========DATA FOUND============")
         if not historical_data:
             raise HTTPException(status_code=404, detail="No historical data found for the specified symbol.")
 
         # Convert historical data to DataFrame
-        data_dicts = [
-            {
-                "date": stock.date,
-                "close_price": stock.close_price,
-            }
-            for stock in historical_data
-        ]
+        data_dicts = [{"date": stock.date, "close_price": stock.close_price} for stock in historical_data]
         df = pd.DataFrame(data_dicts)
 
-        # Prepare data for Linear Regression
+        # Filter the last 30 days of data
         df['date'] = pd.to_datetime(df['date'])
-        df['days'] = (df['date'] - df['date'].min()).dt.days  # Convert dates to numerical values
+        df = df.sort_values('date').tail(30)
+
+        # Prepare data for Linear Regression
+        df['days'] = (df['date'] - df['date'].min()).dt.days
+        X = df[['days']]
+        y = df['close_price']
 
         # Fit a linear regression model
-        X = df[['days']]  # Features (days)
-        y = df['close_price']  # Target variable (close price)
-        
         model = LinearRegression()
         model.fit(X, y)
 
-        print("=========Model Fitted===========")
-        # Predict the next 30 days
-        last_day = df['days'].max()
-        future_days = np.array(range(last_day + 1, last_day + 31)).reshape(-1, 1)
-        predicted_prices = model.predict(future_days)
-        
-        print("=========Predictio Start===========")
+        # Predict the prices for the same 30 days
+        predicted_prices = model.predict(X)
+
         # Prepare predictions for insertion
         prediction_entries = []
-        last_date = df['date'].max()
-        for i, predicted_price in enumerate(predicted_prices):
-            prediction_date = last_date + timedelta(days=i + 1)
+        for i, (actual_price, predicted_price, prediction_date) in enumerate(zip(y, predicted_prices, df['date'])):
             prediction_entry = models.PredictedStockData(
                 symbol="IBM",
                 date=prediction_date,
+                actual_price=actual_price,
                 predicted_price=predicted_price
             )
             prediction_entries.append(prediction_entry)
-            print("Prediction ", prediction_entry.predicted_price,prediction_entry.date)  # Print entries for debugging
 
+        # Add all prediction entries to the session
+        db.add_all(prediction_entries)
+
+        # Commit the transaction
+        await db.commit()
         
-        print("=========Starting Push to db===========")
-        await db.add_all(prediction_entries)  # Add entries to the session
+        # Generate Plot
+        plt.figure(figsize=(12, 6))
+        plt.plot(df['date'], y, label='Actual Prices', marker='o', color='blue')
+        plt.plot(df['date'], predicted_prices, label='Predicted Prices', marker='x', color='orange')
+        plt.title('Actual vs Predicted Stock Prices')
+        plt.xlabel('Date')
+        plt.ylabel('Price')
+        plt.legend()
+        plt.grid()
 
-        print("=========Commiting to DB===========")
-        await db.commit()  # Commit the transaction
+        plot_path = "static/prediction_plot.png"  # Save to static folder in the root of the project
+        if not os.path.exists("static"):
+            os.makedirs("static")
 
-        # Return predictions
-        return [{"date": entry.date, "predicted_price": entry.predicted_price} for entry in prediction_entries]
+        # Save the plot
+        plt.savefig(plot_path)
+        plt.close()  # Close the plot to free up memory
+
+        response_data = {
+            "actual_prices": y.tolist(),  # Convert pandas Series to list
+            "predicted_prices": predicted_prices.tolist(),
+            "dates": df['date'].dt.strftime('%Y-%m-%d').tolist(),  # Format dates
+            "plot_url": plot_path  # Include the plot URL in the response
+        }
+
+        return response_data
 
     except SQLAlchemyError as e:
+        await db.rollback()
         logger.error(f"Database error occurred: {str(e)}")
         raise HTTPException(status_code=500, detail="Database error occurred.")
     except Exception as e:
         logger.error(f"An unexpected error occurred: {str(e)}")
         raise HTTPException(status_code=500, detail=f"An error occurred during prediction: {str(e)}")
 
+
+@router.get("/report/{format}")
+async def get_report(format: str):
+    if format == "pdf":
+        pdf_path = "path/to/report.pdf"
+        return FileResponse(pdf_path, media_type="application/pdf", filename="report.pdf")
+    elif format == "json":
+        metrics = calculate_metrics(data)
+        return JSONResponse(content=metrics)
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported format")

@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Price Prediction</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+
+        #predictionsList {
+            margin-top: 20px;
+            list-style-type: none;
+            padding: 0;
+        }
+
+        img {
+            margin-top: 20px;
+            max-width: 100%;
+            height: auto;
+        }
+
+        button {
+            padding: 10px 15px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Stock Price Prediction</h1>
+    <label for="stockSymbol">Enter Stock Symbol:</label>
+    <input type="text" id="stockSymbol" placeholder="e.g. AAPL" />
+    <button id="predictButton">Get Predictions</button>
+    <ul id="predictionsList"></ul>
+
+    <script>
+        document.getElementById('predictButton').addEventListener('click', async () => {
+            const symbol = document.getElementById('stockSymbol').value.trim(); // Get the input symbol
+            if (!symbol) {
+                alert('Please enter a stock symbol.');
+                return;
+            }
+
+            try {
+                const response = await fetch('http://localhost:8000/data/predict', { // Make sure this matches the route in your FastAPI app
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'text/plain',
+                    },
+                    body: symbol
+                });
+
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+
+                const responseData = await response.json();
+                const predictionsList = document.getElementById("predictionsList");
+                predictionsList.innerHTML = ''; // Clear previous results
+
+                // Loop through the response data
+                for (let i = 0; i < responseData.dates.length; i++) {
+                    const listItem = document.createElement("li");
+                    listItem.textContent = `Date: ${responseData.dates[i]}, Actual Price: ${responseData.actual_prices[i]}, Predicted Price: ${responseData.predicted_prices[i]}`;
+                    predictionsList.appendChild(listItem);
+                }
+
+                // Display the plot
+                const plotImg = document.createElement("img");
+                plotImg.src = "../"+responseData.plot_url; // Set the source to the plot URL
+                plotImg.alt = "Predicted vs Actual Prices";
+                predictionsList.appendChild(plotImg); // Append the image to the predictions list
+
+            } catch (error) {
+                console.error('Error fetching predictions:', error);
+            }
+        });
+    </script>
+</body>
+
+</html>

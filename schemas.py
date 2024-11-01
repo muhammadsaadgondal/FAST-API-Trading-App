@@ -23,11 +23,13 @@ class StockDataResponse(StockDataBase):
         
 
 class PredictedStockData(BaseModel):
-    date: str  # Assuming you will return a date
+    date: date  # Assuming you will return a date
     symbol:str
     predicted_price: float
+    actual_price:float
     class Config:
         orm_mode = True  # Enable ORM mode to work with SQLAlchemy models
+        from_attributes = True
 
 
 # Schema for responses to clients

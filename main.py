@@ -6,6 +6,7 @@ from database import engine, get_db
 import Routes.data as sdata
 import asyncpg
 from dotenv import load_dotenv
+from fastapi.middleware.cors import CORSMiddleware
 # Create the database tables
 
 load_dotenv()
@@ -19,6 +20,14 @@ app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(sdata.router)
 
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Update this with your actual frontend origin if needed
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all HTTP methods
+    allow_headers=["*"],  # Allow all headers
+)
 
 
 async def create_database(db_name: str):
