@@ -1,22 +1,35 @@
-version: '3.8'
 
 services:
   fastapi:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "8000:8000"
+    volumes:
+      - .:/app
     depends_on:
       - db
     env_file:
       - .env  
     environment:
-      - DATABASE_URL=postgresql+asyncpg://app_user:saad123@db:5432/stock_db 
+      - POSTGRES_HOST=service_name_of_db
+      - POSTGRES_USER=app_user
+      - POSTGRES_PASSWORD=saad123
+      - POSTGRES_DB=stock_db
+    networks:
+      - practice
   
   db:
     image: postgres:13
     environment:
-      POSTGRES_DB: stock_db
-      POSTGRES_USER: app_user
-      POSTGRES_PASSWORD: saad123
-    ports:
-      - "5432:5432"
+      - POSTGRES_HOST=service_name_of_db
+      - POSTGRES_USER=app_user
+      - POSTGRES_PASSWORD=saad123
+      - POSTGRES_DB=stock_db
+    env_file:
+      - ./.env
+    networks:
+      - practice
+networks:
+  practice:
