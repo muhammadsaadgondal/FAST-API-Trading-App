@@ -3,55 +3,61 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Stock Price Predictor</title>
+    <title>Stock Price Predictor Summary</title>
     <script>
+        // Function to fetch stock price predictions
         async function predictStockPrices() {
-            const symbol = document.getElementById("stockSymbol").value;
-            const response = await fetch('http://54.159.129.226:8000/data/predict', { // Update with your actual backend URL
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ symbol })  // Assuming symbol is the only input needed for prediction
-            });
+            const stockSymbol = document.getElementById("stockSymbol").value.trim();
+            const url = `http://54.159.129.226:8000/data/predict/${stockSymbol}`;
+            try {
+                if (!stockSymbol) {
+                    alert("Please enter a stock symbol.");
+                    return;
+                }
 
-            if (!response.ok) {
-                alert('Error: ' + response.statusText);
-                return;
+                const response = await fetch(url, { method: "POST" });
+                if (!response.ok) throw new Error(`Error: ${response.statusText}`);
+
+                const data = await response.json();
+
+                // Populate the predictions list
+                const predictionsList = document.getElementById("predictionsList");
+                predictionsList.innerHTML = `
+                    <li><strong>Dates:</strong> ${data.dates.join(", ")}</li>
+                    <li><strong>Actual Prices:</strong> ${data.actual_prices.join(", ")}</li>
+                    <li><strong>Predicted Prices:</strong> ${data.predicted_prices.join(", ")}</li>
+                `;
+
+                // Display the prediction plot
+                const predictionPlot = document.getElementById("predictionPlot");
+                predictionPlot.innerHTML = `<img src="${data.plot_url}" alt="Prediction Plot" style="max-width: 100%;"/>`;
+
+                // Show report buttons
+                document.getElementById("reportButtons").style.display = "block";
+            } catch (error) {
+                alert("Error fetching predictions: " + error.message);
             }
-
-            const predictions = await response.json();
-            const predictionsList = document.getElementById("predictionsList");
-            predictionsList.innerHTML = ''; // Clear previous results
-
-            predictions.forEach(prediction => {
-                const listItem = document.createElement("li");
-                listItem.textContent = `Date: ${prediction.date}, Predicted Price: ${prediction.predicted_price}`;
-                predictionsList.appendChild(listItem);
-            });
-
-            // Show report download buttons after predictions
-            document.getElementById("reportButtons").style.display = 'block';
         }
 
+        // Function to download performance reports
         async function downloadReport(format) {
             const url = `http://54.159.129.226:8000/data/report/${format}`;
             try {
                 if (format === "pdf") {
                     const response = await fetch(url);
-                    if (!response.ok) throw new Error('Failed to fetch PDF report');
-                    
+                    if (!response.ok) throw new Error("Failed to fetch PDF report");
+
                     const blob = await response.blob();
-                    const url = window.URL.createObjectURL(blob);
+                    const pdfUrl = window.URL.createObjectURL(blob);
                     const a = document.createElement("a");
-                    a.href = url;
+                    a.href = pdfUrl;
                     a.download = "report.pdf";
                     a.click();
-                    window.URL.revokeObjectURL(url);
+                    window.URL.revokeObjectURL(pdfUrl);
                 } else if (format === "json") {
                     const response = await fetch(url);
-                    if (!response.ok) throw new Error('Failed to fetch JSON report');
-                    
+                    if (!response.ok) throw new Error("Failed to fetch JSON report");
+
                     const data = await response.json();
                     const jsonBlob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
                     const jsonUrl = window.URL.createObjectURL(jsonBlob);
@@ -62,24 +68,28 @@
                     window.URL.revokeObjectURL(jsonUrl);
                 }
             } catch (error) {
-                alert('Error downloading report: ' + error.message);
+                alert("Error downloading report: " + error.message);
             }
         }
     </script>
 </head>
 <body>
     <h1>Stock Price Predictor</h1>
-    <input 
-        type="text" 
-        id="stockSymbol" 
-        placeholder="Enter stock symbol"
-    />
-    <button onclick="predictStockPrices()">Predict Prices</button>
+    <div>
+        <input 
+            type="text" 
+            id="stockSymbol" 
+            placeholder="Enter stock symbol"
+        />
+        <button onclick="predictStockPrices()">Predict Prices</button>
+    </div>
 
-    <h2>Predicted Prices:</h2>
+    <h2>Prediction Summary:</h2>
     <ul id="predictionsList"></ul>
 
-    <!-- Report Download Buttons -->
+    <div id="predictionPlot" style="margin-top: 20px;"></div>
+
+    <!-- Report Download Section -->
     <div id="reportButtons" style="display: none; margin-top: 20px;">
         <h2>Download Performance Report:</h2>
         <button onclick="downloadReport('pdf')">Download as PDF</button>
