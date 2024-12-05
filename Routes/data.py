@@ -55,9 +55,8 @@ async def test_posts(symbol:str,db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=500, detail="An unexpected error occurred while processing your request.")
 
 @router.post('/populate/{symbol}', response_model=List[schemas.CreateStockData])
-async def populate_stocks(db: AsyncSession = Depends(get_db)):
+async def populate_stocks(symbol:str,db: AsyncSession = Depends(get_db)):
     api_key = os.getenv("ALPHA_VANTAGE_API_KEY")
-    symbol = symbol
     url = f'https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={symbol}&apikey={api_key}&outputsize=full'
 
     try:
@@ -266,8 +265,8 @@ async def read_backtest():
 async def read_backtest():
     return FileResponse("Views/summary.html")
 
-@router.post('/predict', response_model=dict)
-async def predict_stock_prices(symbol: str = Body(...),db: AsyncSession = Depends(get_db)):
+@router.post('/predict/{symbol}', response_model=dict)
+async def predict_stock_prices(symbol: str ,db: AsyncSession = Depends(get_db)):
     try:
         # Check database session
         if db is None:

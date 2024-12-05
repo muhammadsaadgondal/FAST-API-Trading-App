@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Controls</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin: 50px;
+        }
+
+        h1 {
+            color: #333;
+        }
+
+        .button-container {
+            margin-top: 20px;
+        }
+
+        .api-button {
+            display: inline-block;
+            margin: 10px;
+            padding: 15px 30px;
+            font-size: 16px;
+            color: #fff;
+            background-color: #007BFF;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        .api-button:hover {
+            background-color: #0056b3;
+        }
+
+        .message {
+            margin-top: 20px;
+            font-size: 18px;
+            color: #555;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>API Control Panel</h1>
+
+    <div class="button-container">
+        <button class="api-button" id="populate-btn">Populate Database</button>
+        <button class="api-button" id="predict-btn">Get Prediction</button>
+        <button class="api-button" id="backtest-btn">Run Backtesting</button>
+        <button class="api-button" id="summary-btn">Get Summary</button>
+    </div>
+
+    <div class="message" id="message"></div>
+
+    <script>
+        document.getElementById('populate-btn').addEventListener('click', () => {
+            window.location.href = 'http://54.159.129.226:8000/data/populate';
+        });
+
+        document.getElementById('predict-btn').addEventListener('click', () => {
+            window.location.href = 'http://54.159.129.226:8000/data/predict';
+        });
+
+        document.getElementById('backtest-btn').addEventListener('click', () => {
+            window.location.href = 'http://54.159.129.226:8000/data/backtest';
+        });
+
+        document.getElementById('summary-btn').addEventListener('click', () => {
+            const format = prompt("Enter format (pdf/json):");
+            if (format === 'pdf' || format === 'json') {
+                window.location.href = `http://54.159.129.226:8000/data/summary?format=${format}`;
+            } else {
+                alert('Invalid format! Please enter "pdf" or "json".');
+            }
+        });
+    </script>
+
+
+</body>
+
+</html>

@@ -7,6 +7,7 @@ import Routes.data as sdata
 import asyncpg
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 # Create the database tables
 
 load_dotenv()
@@ -50,8 +51,8 @@ async def startup_event():
     await init_models()
 
 @app.get("/")
-async def root():
-   return {"Message":"Working ha vro"}
+async def read_backtest():
+    return FileResponse("Views/home.html")
 
 
 @app.get("/hello/{name}")
