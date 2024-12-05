@@ -55,7 +55,7 @@ async def test_posts(symbol:str,db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=500, detail="An unexpected error occurred while processing your request.")
 
 @router.post('/populate/{symbol}', response_model=List[schemas.CreateStockData])
-async def populate_stocks(symbol:str,db: AsyncSession = Depends(get_db)):
+async def populate_stocks(db: AsyncSession = Depends(get_db)):
     api_key = os.getenv("ALPHA_VANTAGE_API_KEY")
     symbol = symbol
     url = f'https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={symbol}&apikey={api_key}&outputsize=full'

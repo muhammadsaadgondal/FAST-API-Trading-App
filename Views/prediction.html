@@ -47,12 +47,11 @@
             }
 
             try {
-                const response = await fetch('http://localhost:8000/data/predict', { // Make sure this matches the route in your FastAPI app
+                const response = await fetch(`http://localhost:8000/data/predict/${symbol}`, { // Make sure this matches the route in your FastAPI app
                     method: 'POST',
                     headers: {
                         'Content-Type': 'text/plain',
-                    },
-                    body: symbol
+                    }
                 });
 
                 if (!response.ok) {
